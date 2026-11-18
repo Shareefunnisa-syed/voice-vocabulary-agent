@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Word Coach: a voice vocabulary agent</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@600;700&family=DM+Sans:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f3f0ff;--surface:#fff;--ink:#1d1535;--muted:#625a7d;--line:#ddd6f5;--accent:#5b3df5;--accent-ink:#fff;--warm:#ffb703;--ok:#0f8a5f;--bad:#c2410c;
+box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#120e22;--surface:#1b1631;--ink:#efeaff;--muted:#a79fc4;--line:#322a52;--accent:#8f7dff;--accent-ink:#120e22;--warm:#ffc83d;--ok:#4cd6a0;--bad:#ff9a6b;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#120e22;--surface:#1b1631;--ink:#efeaff;--muted:#a79fc4;--line:#322a52;--accent:#8f7dff;--accent-ink:#120e22;--warm:#ffc83d;--ok:#4cd6a0;--bad:#ff9a6b;color-scheme:dark}
+*,*::before,*::after{box-sizing:inherit}
+html{height:100%}
+body{margin:0;min-height:100%;background:var(--bg);color:var(--ink);font:400 17px/1.55 "DM Sans",system-ui,sans-serif}
+.wrap{max-width:560px;margin:0 auto;padding:28px 20px 40px}
+h1{font:700 clamp(30px,8vw,40px)/1.1 "Fraunces",Georgia,serif;margin:0 0 6px}
+.sub{color:var(--muted);margin:0 0 26px}
+.stage{display:flex;flex-direction:column;align-items:center;gap:14px;margin-bottom:22px}
+.orb{width:132px;height:132px;border-radius:50%;border:0;cursor:pointer;background:var(--accent);color:var(--accent-ink);font:700 19px "DM Sans",sans-serif;box-shadow:0 0 0 10px color-mix(in srgb,var(--accent) 18%,transparent);transition:box-shadow .25s}
+.orb[data-state="speaking"]{background:var(--warm);color:#2b2100;animation:pulse 1.1s ease-in-out infinite}
+.orb[data-state="listening"]{animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{box-shadow:0 0 0 22px color-mix(in srgb,var(--accent) 10%,transparent)}}
+.status{font-weight:500;color:var(--muted);min-height:1.6em;text-align:center}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:20px}
+.label{font-size:14px;color:var(--muted);margin:0 0 4px}
+.def{font:600 22px/1.3 "Fraunces",Georgia,serif;margin:0 0 14px}
+.mask{font:700 28px/1 "Fraunces",Georgia,serif;letter-spacing:.18em;margin:0 0 14px;word-break:break-all}
+.said{min-height:1.5em;margin:0 0 6px}
+.msg{min-height:1.5em;margin:0;font-weight:500}
+.msg.ok{color:var(--ok)}.msg.bad{color:var(--bad)}
+.row{display:flex;gap:8px;margin-top:16px}
+input{flex:1;min-width:0;font:inherit;padding:11px 13px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--ink)}
+button.s{font:700 15px "DM Sans",sans-serif;padding:10px 16px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--ink);cursor:pointer}
+button.p{font:700 15px "DM Sans",sans-serif;padding:10px 18px;border-radius:999px;border:0;background:var(--accent);color:var(--accent-ink);cursor:pointer}
+.tools{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
+.score{display:flex;justify-content:space-between;margin-top:18px;color:var(--muted);font-size:15px}
+.note{margin-top:18px;font-size:14px;color:var(--muted)}
+:focus-visible{outline:3px solid var(--accent);outline-offset:3px;border-radius:8px}
+@media (prefers-reduced-motion:reduce){.orb{animation:none!important;transition:none}}
+</style>
+</head>
+<body>
+<main class="wrap">
+<h1>Word Coach</h1>
+<p class="sub">A voice agent that teaches vocabulary. It reads you a meaning, and you say the word.</p>
+
+<div class="stage">
+<button class="orb" id="orb" data-state="idle" aria-label="Start or stop the coach">Start</button>
+<div class="status" id="status" role="status" aria-live="polite">Tap Start and allow the microphone.</div>
+</div>
+
+<section class="card" aria-label="Current word">
+<p class="label">Meaning</p>
+<p class="def" id="def">Your first word is waiting.</p>
+<p class="label">Word</p>
+<p class="mask" id="mask">_ _ _ _ _</p>
+<p class="said" id="said"></p>
+<p class="msg" id="msg"></p>
+<div class="row">
+<input id="typed" aria-label="Type your answer" placeholder="Or type your answer" autocomplete="off">
+<button class="p" id="check">Check</button>
+</div>
+<div class="tools">
+<button class="s" id="hint">Hint</button>
+<button class="s" id="repeat">Repeat</button>
+<button class="s" id="skip">Skip</button>
+</div>
+<div class="score"><span id="count">Word 0 of 8</span><span id="score">Score 0</span></div>
+</section>
+<p class="note" id="note">Voice answers work best in Chrome or Edge. You can also say “hint”, “repeat”, “skip” or “stop”.</p>
+</main>
+
+<script>
+var WORDS=[
+{w:"ephemeral",d:"lasting for a very short time",e:"The beauty of the sunset was ephemeral."},
+{w:"meticulous",d:"showing great attention to detail",e:"She kept meticulous records of every order."},
+{w:"resilient",d:"able to recover quickly after difficulty",e:"A resilient team learns from every setback."},
+{w:"ambiguous",d:"open to more than one meaning",e:"The instructions were ambiguous, so we asked for details."},
+{w:"candid",d:"honest and direct, even when it is hard to hear",e:"He gave a candid answer about the delay."},
+{w:"pragmatic",d:"focused on what works in practice",e:"We took a pragmatic approach and fixed the biggest problem first."},
+{w:"ubiquitous",d:"seen or found everywhere",e:"Smartphones are ubiquitous in modern life."},
+{w:"scrutinize",d:"to examine something very carefully",e:"Auditors scrutinize every figure in the report."},
+{w:"eloquent",d:"able to speak clearly and convincingly",e:"Her eloquent speech won everyone over."},
+{w:"benevolent",d:"kind and wanting to help others",e:"The benevolent teacher stayed late to help students."}
+];
+var TOTAL=8;
+var SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+var $=function(id){return document.getElementById(id)};
+var orb=$("orb"),statusEl=$("status"),defEl=$("def"),maskEl=$("mask"),saidEl=$("said"),msgEl=$("msg"),typed=$("typed");
+var active=false,resolver=null,rec=null,cur=null,hintLevel=0,score=0,asked=0,order=[],voice=null;
+
+function setState(s,text){orb.dataset.state=s;orb.textContent=active?"Stop":"Start";statusEl.textContent=text||""}
+function note(t){$("note").textContent=t}
+function shuffle(a){a=a.slice();for(var i=a.length-1;i>0;i--){var j=Math.floor(Math.random()*(i+1));var t=a[i];a[i]=a[j];a[j]=t}return a}
+function pickVoice(){var v=window.speechSynthesis?speechSynthesis.getVoices():[];voice=v.filter(function(x){return /^en/i.test(x.lang)})[0]||null}
+if(window.speechSynthesis){pickVoice();speechSynthesis.onvoiceschanged=pickVoice}
+
+function say(text){
+ return new Promise(function(res){
+  if(!window.speechSynthesis||!active){res();return}
+  setState("speaking","Speaking…");
+  speechSynthesis.cancel();
+  var u=new SpeechSynthesisUtterance(text);
+  if(voice)u.voice=voice;u.lang="en-US";u.rate=0.95;
+  u.onend=function(){res()};u.onerror=function(){res()};
+  speechSynthesis.speak(u);
+ });
+}
+function lev(a,b){var m=[],i,j;for(i=0;i<=a.length;i++){m[i]=[i]}for(j=0;j<=b.length;j++){m[0][j]=j}
+ for(i=1;i<=a.length;i++)for(j=1;j<=b.length;j++){m[i][j]=Math.min(m[i-1][j]+1,m[i][j-1]+1,m[i-1][j-1]+(a[i-1]===b[j-1]?0:1))}return m[a.length][b.length]}
+function matches(text){
+ var words=text.toLowerCase().replace(/[^a-z\s]/g," ").split(/\s+/).filter(Boolean);
+ return words.some(function(w){return w===cur.w||lev(w,cur.w)<=1})
+}
+function stopRec(){if(rec){rec.onend=null;try{rec.abort()}catch(e){}rec=null}}
+function startRec(){
+ if(!SR||!active||!resolver)return;
+ stopRec();
+ rec=new SR();rec.lang="en-US";rec.interimResults=false;rec.maxAlternatives=3;
+ rec.onresult=function(e){var alts=[];for(var i=0;i<e.results[0].length;i++)alts.push(e.results[0][i].transcript);answer(alts.join(" "),alts[0])};
+ rec.onerror=function(e){if(e.error==="not-allowed"||e.error==="service-not-allowed"){note("The microphone is blocked. Allow it in your browser, or type your answers.");rec=null}};
+ rec.onend=function(){if(resolver&&active&&rec)setTimeout(startRec,250)};
+ try{rec.start();setState("listening","Listening… say the word.")}catch(e){}
+}
+function answer(all,shown){if(!resolver)return;var r=resolver;resolver=null;stopRec();saidEl.textContent="You said: "+shown;r(all)}
+function waitForAnswer(){return new Promise(function(res){resolver=res;if(SR)startRec();else setState("listening","Type your answer below.")})}
+function show(msg,cls){msgEl.textContent=msg;msgEl.className="msg "+(cls||"")}
+function maskText(n){var s="";for(var i=0;i<cur.w.length;i++){s+=(i<n?cur.w[i].toUpperCase():"_")+" "}return s.trim()}
+
+async function turn(){
+ cur=order[asked];asked++;hintLevel=0;
+ $("count").textContent="Word "+asked+" of "+TOTAL;
+ defEl.textContent=cur.d.charAt(0).toUpperCase()+cur.d.slice(1)+".";
+ maskEl.textContent=maskText(0);saidEl.textContent="";show("");
+ await say("Word "+asked+". Which word means: "+cur.d+"?");
+ var tries=0;
+ while(active){
+  var heard=await waitForAnswer();
+  if(!active)return;
+  var t=heard.toLowerCase();
+  if(/\b(stop|quit|end session)\b/.test(t)){stopAll("Stopped. Tap Start to try again.");return}
+  if(/\bhint\b/.test(t)){await giveHint();continue}
+  if(/\b(repeat|again|say that)\b/.test(t)){await say("The meaning is: "+cur.d);continue}
+  if(/\b(skip|pass|next)\b/.test(t)){await reveal(false);return}
+  if(matches(heard)){score++;$("score").textContent="Score "+score;maskEl.textContent=maskText(cur.w.length);show("Correct: "+cur.w,"ok");await say("Correct! "+cur.w+". For example: "+cur.e);return}
+  tries++;
+  if(tries>=3){await reveal(true);return}
+  show("Not quite. Try again or ask for a hint.","bad");
+  await say("Not quite. Try again, or say hint.");
+ }
+}
+async function giveHint(){
+ hintLevel=Math.min(hintLevel+1,Math.max(1,cur.w.length-2));
+ maskEl.textContent=maskText(hintLevel);
+ await say("It starts with "+cur.w.slice(0,hintLevel).split("").join(", ")+" and has "+cur.w.length+" letters.");
+}
+async function reveal(){
+ maskEl.textContent=maskText(cur.w.length);show("The word was: "+cur.w,"bad");
+ await say("The word is "+cur.w+". For example: "+cur.e);
+}
+function stopAll(text){active=false;resolver=null;stopRec();if(window.speechSynthesis)speechSynthesis.cancel();setState("idle",text||"")}
+async function session(){
+ active=true;score=0;asked=0;order=shuffle(WORDS).slice(0,TOTAL);$("score").textContent="Score 0";
+ setState("speaking","Starting…");
+ await say("Hi! I will read you a meaning, and you say the word. You can say hint, repeat, skip or stop at any time.");
+ while(active&&asked<TOTAL){await turn()}
+ if(active){var msg="Session complete. You scored "+score+" out of "+TOTAL+".";defEl.textContent=msg;maskEl.textContent="";show("");await say(msg+" Tap Start to practise again.");stopAll(msg)}
+}
+orb.addEventListener("click",function(){if(active){stopAll("Stopped. Tap Start to try again.")}else{session()}});
+$("check").addEventListener("click",function(){if(typed.value.trim()){answer(typed.value,typed.value);typed.value=""}});
+typed.addEventListener("keydown",function(e){if(e.key==="Enter"){$("check").click()}});
+$("hint").addEventListener("click",function(){answer("hint","hint")});
+$("repeat").addEventListener("click",function(){answer("repeat","repeat")});
+$("skip").addEventListener("click",function(){answer("skip","skip")});
+if(!SR){note("Voice answers need Chrome or Edge. The coach will still read each meaning aloud, and you can type your answers.")}
+</script>
+</body>
+</html>
